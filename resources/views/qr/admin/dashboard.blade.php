@@ -1,0 +1,23 @@
+<x-app-layout>
+    <x-slot name="header"><div class="flex flex-wrap items-center justify-between gap-3"><div><h2 class="text-2xl font-bold text-gray-800">Dashboard Dynamic QR</h2><p class="mt-1 text-sm text-gray-500">Ringkasan produksi dan status QR review.</p></div><a href="{{ route('admin.qr-templates.index') }}" style="background-color:#15803d;color:#ffffff;" class="rounded-lg px-4 py-2 font-bold">Kelola Template</a></div></x-slot>
+    <div class="py-8"><div class="mx-auto max-w-7xl space-y-6 px-4 sm:px-6 lg:px-8">
+        @php($activityMax = max(1, collect($dailyActivity)->max(fn ($day) => max($day['scans'], $day['reviews']))))
+        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            @foreach(['templates' => 'Template', 'units' => 'Total Unit', 'empty' => 'Kosong', 'pending' => 'Diproses', 'active' => 'Aktif', 'disabled' => 'Nonaktif', 'clients' => 'Klien QR', 'active_subscriptions' => 'Subscription Aktif', 'pending_invoices' => 'Tagihan Menunggu'] as $key => $label)
+                <article class="rounded-xl bg-white p-5 shadow-sm"><p class="text-sm font-medium text-gray-500">{{ $label }}</p><p class="mt-2 text-3xl font-bold text-gray-900">{{ number_format($stats[$key]) }}</p></article>
+            @endforeach
+            <article class="rounded-xl bg-white p-5 shadow-sm"><p class="text-sm font-medium text-gray-500">Total scan / akses QR</p><p class="mt-2 text-3xl font-bold text-gray-900">{{ number_format($scanTotal) }}</p></article>
+            <article class="rounded-xl bg-white p-5 shadow-sm"><p class="text-sm font-medium text-gray-500">Klik menuju Google Review</p><p class="mt-2 text-3xl font-bold text-gray-900">{{ number_format($reviewClickTotal) }}</p></article>
+        </div>
+        <section class="rounded-xl bg-white p-5 shadow-sm sm:p-6">
+            <div class="flex flex-wrap items-start justify-between gap-3"><div><h3 class="font-bold text-gray-800">Aktivitas 14 hari terakhir</h3><p class="mt-1 text-sm text-gray-500">Jumlah akses QR dan redirect menuju Google Review per hari.</p></div><div class="flex gap-4 text-xs font-semibold"><span class="flex items-center gap-2"><i class="h-3 w-3 rounded-sm bg-green-600"></i>Scan</span><span class="flex items-center gap-2"><i class="h-3 w-3 rounded-sm bg-blue-600"></i>Klik review</span></div></div>
+            <div class="mt-6 overflow-x-auto"><div class="flex h-48 min-w-[700px] items-end gap-2 border-b border-gray-200 px-2">@foreach($dailyActivity as $day)<div class="flex h-full min-w-8 flex-1 flex-col items-center justify-end"><div class="flex h-[160px] w-full items-end justify-center gap-1"><div title="{{ $day['scans'] }} scan" class="w-2/5 rounded-t bg-green-600" style="height:{{ max(2, (int) round($day['scans'] / $activityMax * 100)) }}%"></div><div title="{{ $day['reviews'] }} klik review" class="w-2/5 rounded-t bg-blue-600" style="height:{{ max(2, (int) round($day['reviews'] / $activityMax * 100)) }}%"></div></div><span class="mt-2 text-[10px] text-gray-500">{{ $day['label'] }}</span></div>@endforeach</div></div>
+            <p class="mt-3 text-xs text-gray-500">Scan adalah jumlah akses URL QR, bukan jumlah orang unik. Klik review menghitung redirect ke Google, bukan review yang sudah diposting.</p>
+        </section>
+        <section class="overflow-hidden rounded-xl bg-white shadow-sm"><div class="flex items-center justify-between border-b p-5"><div><h3 class="font-bold text-gray-800">Unit terbaru</h3><p class="mt-1 text-sm text-gray-500">Perubahan produksi dan tempat terbaru.</p></div><a href="{{ route('admin.qr-units.index') }}" class="font-semibold text-green-700">Lihat semua unit</a></div>
+            <div class="overflow-x-auto"><table class="w-full text-left text-sm"><thead class="bg-gray-50 text-xs uppercase text-gray-500"><tr><th class="px-5 py-3">Nama unit / tempat</th><th class="px-5 py-3">Template</th><th class="px-5 py-3">Status</th><th class="px-5 py-3"></th></tr></thead><tbody class="divide-y divide-gray-100">
+                @forelse($recentUnits as $unit)<tr><td class="px-5 py-3"><div class="font-semibold">{{ $unit->currentDestination?->place_name ?: $unit->unit_code }}</div>@if($unit->currentDestination)<div class="font-mono text-xs text-gray-500">{{ $unit->unit_code }}</div>@endif</td><td class="px-5 py-3">{{ $unit->template->name }}</td><td class="px-5 py-3">{{ $unit->status }}</td><td class="px-5 py-3 text-right"><a class="font-semibold text-green-700" href="{{ route('admin.qr-units.show', $unit) }}">Detail</a></td></tr>@empty<tr><td colspan="4" class="px-5 py-8 text-center text-gray-500">Belum ada unit. Buat template dan produksi unit pertama.</td></tr>@endforelse
+            </tbody></table></div>
+        </section>
+    </div></div>
+</x-app-layout>
