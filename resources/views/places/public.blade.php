@@ -17,7 +17,7 @@
             @elseif (blank($place->name) && blank($place->address))
                 <p class="text-sm font-semibold uppercase tracking-wide text-green-700">QR tempat baru</p>
                 <h1 class="mt-2 text-2xl font-bold sm:text-3xl">Isi nama dan alamat tempat</h1>
-                <p class="mt-3 leading-7 text-gray-600">Setelah disimpan, Anda akan diarahkan ke halaman Google Review. QR ini akan tetap sama dan langsung membuka link review tersebut saat dipindai lagi.</p>
+                <p class="mt-3 leading-7 text-gray-600">Setelah nama dan alamat tersimpan, Anda dapat memberi penilaian dan memilih apakah ingin membagikan ulasan di Google. QR ini akan tetap sama.</p>
                 <form method="POST" action="{{ route('places.public.review', $place) }}" class="mt-6 space-y-4">
                     @csrf
                     <div>
@@ -32,8 +32,39 @@
                             class="w-full rounded-lg border-gray-300 focus:border-green-500 focus:ring-green-500" placeholder="Masukkan alamat atau tempel link Google Maps">
                         @error('place_address')<p class="mt-1 text-sm text-red-600">{{ $message }}</p>@enderror
                     </div>
-                    <button type="submit" class="block w-full rounded-lg bg-green-700 px-5 py-3 text-center font-semibold text-white hover:bg-green-800">Simpan dan buka Google Review</button>
+                    <button type="submit" style="background-color:#15803d;color:#ffffff;border:1px solid #166534;" class="block w-full rounded-lg px-5 py-3 text-center font-semibold hover:brightness-90">Simpan data tempat</button>
                 </form>
+            @elseif (filled($place->name) || filled($place->address))
+                <p class="text-sm font-semibold uppercase tracking-wide text-green-700">Umpan balik tamu</p>
+                <h1 class="mt-2 text-2xl font-bold sm:text-3xl">Bagaimana pengalaman Anda?</h1>
+                <p class="mt-3 leading-7 text-gray-600">Pilih rating dan tulis ulasan opsional. Setelah dikirim, feedback tersimpan di aplikasi dan Anda dapat membuka Google Review.</p>
+                @if ($feedbackSubmitted)
+                    <div class="mt-5 rounded-lg bg-green-50 p-4 text-sm text-green-800" role="status">Terima kasih, feedback Anda sudah tersimpan.</div>
+                    @if (filled($place->google_review_url))
+                        <a href="{{ $place->google_review_url }}" target="_blank" rel="noopener noreferrer" style="background-color:#15803d;color:#ffffff;border:1px solid #166534;" class="mt-5 block w-full rounded-lg px-5 py-3 text-center font-semibold hover:brightness-90">Lanjut ke Google Review</a>
+                    @endif
+                @else
+                    <form method="POST" action="{{ route('places.public.feedback', $place) }}" class="mt-6 space-y-5">
+                        @csrf
+                        <input type="hidden" name="submission_token" value="{{ $submissionToken }}">
+                        <fieldset>
+                            <legend class="mb-2 block text-sm font-semibold text-gray-700">Rating Anda</legend>
+                            <div class="flex flex-wrap gap-2" role="radiogroup" aria-label="Rating 1 sampai 5 bintang">
+                                @foreach (range(1, 5) as $rating)
+                                    <label class="cursor-pointer">
+                                        <input class="peer sr-only" type="radio" name="rating" value="{{ $rating }}" required>
+                                        <span class="inline-flex min-h-11 items-center rounded-lg border border-gray-300 px-4 text-sm font-semibold text-gray-700 peer-checked:border-green-700 peer-checked:bg-green-50 peer-checked:text-green-800 peer-focus-visible:ring-2 peer-focus-visible:ring-green-600">{{ $rating }} ★</span>
+                                    </label>
+                                @endforeach
+                            </div>
+                        </fieldset>
+                        <div>
+                            <label for="comment" class="mb-1 block text-sm font-semibold text-gray-700">Ulasan (opsional)</label>
+                            <textarea id="comment" name="comment" rows="4" maxlength="2000" class="w-full rounded-lg border-gray-300 focus:border-green-500 focus:ring-green-500" placeholder="Ceritakan pengalaman Anda"></textarea>
+                        </div>
+                        <button type="submit" style="background-color:#15803d;color:#ffffff;border:1px solid #166534;" class="block w-full rounded-lg px-5 py-3 text-center font-semibold hover:brightness-90">Kirim penilaian</button>
+                    </form>
+                @endif
             @else
                 <p class="text-sm font-semibold uppercase tracking-wide text-green-700">Informasi tempat</p>
                 <h1 class="mt-2 text-2xl font-bold sm:text-3xl">{{ $place->name }}</h1>

@@ -20,9 +20,13 @@ class PasswordController extends Controller
             'password' => ['required', Password::defaults(), 'confirmed'],
         ]);
 
-        $request->user()->update([
+        $user = $request->user();
+        $user->update([
             'password' => Hash::make($validated['password']),
         ]);
+        if ($user->role === 'qr_client') {
+            $user->qrClient?->update(['password_encrypted' => $validated['password']]);
+        }
 
         return back()->with('status', 'password-updated');
     }

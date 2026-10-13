@@ -95,6 +95,12 @@
             <span class="mr-3 text-xl">📍</span>
             {{ __('QR Tempat') }}
         </x-nav-link>
+
+        <x-nav-link :href="route('feedback.index')" :active="request()->routeIs('feedback.*')"
+            class="nav-link flex items-center px-4 py-3 text-sm font-semibold rounded-xl transition-all duration-200 {{ request()->routeIs('feedback.*') ? 'active bg-gradient-to-r from-green-50 to-emerald-50 text-green-700 shadow-sm' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-800' }}">
+            <span class="mr-3 text-xl">💬</span>
+            {{ __('Feedback Tamu') }}
+        </x-nav-link>
         @endif
 
         @if (Auth::user()->role === 'admin')
@@ -118,13 +124,16 @@
                 <a href="{{ route('admin.qr-clients.index') }}" class="block rounded-lg px-3 py-2 text-sm font-medium {{ request()->routeIs('admin.qr-clients.*') ? 'bg-green-50 text-green-800' : 'text-gray-600 hover:bg-gray-50' }}">Klien</a>
                 <a href="{{ route('admin.qr-plans.index') }}" class="block rounded-lg px-3 py-2 text-sm font-medium {{ request()->routeIs('admin.qr-plans.*') ? 'bg-green-50 text-green-800' : 'text-gray-600 hover:bg-gray-50' }}">Paket</a>
                 <a href="{{ route('admin.qr-invoices.index') }}" class="block rounded-lg px-3 py-2 text-sm font-medium {{ request()->routeIs('admin.qr-invoices.*') ? 'bg-green-50 text-green-800' : 'text-gray-600 hover:bg-gray-50' }}">Pembayaran</a>
+                <a href="{{ route('admin.activity-logs.index') }}" class="block rounded-lg px-3 py-2 text-sm font-medium {{ request()->routeIs('admin.activity-logs.*') ? 'bg-green-50 text-green-800' : 'text-gray-600 hover:bg-gray-50' }}">Activity Log</a>
             </div>
         @endif
 
         @if (Auth::user()->role === 'qr_client')
             <x-nav-link :href="route('client.dashboard')" :active="request()->routeIs('client.dashboard')" class="nav-link flex items-center px-4 py-3 text-sm font-semibold rounded-xl {{ request()->routeIs('client.dashboard') ? 'bg-green-50 text-green-800' : 'text-gray-600 hover:bg-gray-50' }}">Dashboard Klien</x-nav-link>
+            <x-nav-link :href="route('client.activity-logs.index')" :active="request()->routeIs('client.activity-logs.*')" class="nav-link flex items-center px-4 py-3 text-sm font-semibold rounded-xl {{ request()->routeIs('client.activity-logs.*') ? 'bg-green-50 text-green-800' : 'text-gray-600 hover:bg-gray-50' }}">Activity Log</x-nav-link>
             <x-nav-link :href="route('client.plans')" :active="request()->routeIs('client.plans')" class="nav-link flex items-center px-4 py-3 text-sm font-semibold rounded-xl {{ request()->routeIs('client.plans') ? 'bg-green-50 text-green-800' : 'text-gray-600 hover:bg-gray-50' }}">Paket Subscription</x-nav-link>
             <x-nav-link :href="route('client.units')" :active="request()->routeIs('client.units')" class="nav-link flex items-center px-4 py-3 text-sm font-semibold rounded-xl {{ request()->routeIs('client.units') ? 'bg-green-50 text-green-800' : 'text-gray-600 hover:bg-gray-50' }}">QR Saya</x-nav-link>
+            <x-nav-link :href="route('client.feedback')" :active="request()->routeIs('client.feedback')" class="nav-link flex items-center px-4 py-3 text-sm font-semibold rounded-xl {{ request()->routeIs('client.feedback') ? 'bg-green-50 text-green-800' : 'text-gray-600 hover:bg-gray-50' }}">Feedback Tamu</x-nav-link>
         @endif
 
         @if (false)
@@ -243,7 +252,7 @@
 
     <!-- FOOTER: User Profile & Logout -->
     <div class="p-4 border-t border-gray-200 bg-gradient-to-r from-gray-50 to-green-50 shrink-0">
-        <a href="{{ route('profile.edit') }}"
+        <a href="{{ Auth::user()->role === 'qr_client' ? route('client.profile.edit') : route('profile.edit') }}"
             class="flex items-center gap-3 p-3 mb-3 transition-all duration-200 rounded-xl hover:bg-white hover:shadow-md group"
             title="Edit Profil">
             <div

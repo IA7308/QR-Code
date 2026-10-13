@@ -16,10 +16,35 @@
             <p class="text-xs font-bold uppercase tracking-wide text-green-700">{{ $unit->template->name }} · {{ $unit->unit_code }}</p>
             @if($unit->status === 'EMPTY')
                 <h1 class="mt-2 text-2xl font-bold sm:text-3xl">Aktifkan QR untuk Google Review</h1>
-                <p class="mt-3 leading-7 text-gray-600">Ketik nama tempat, pilih hasil Google Maps yang sesuai, lalu simpan. QR ini akan terhubung ke tempat yang dipilih.</p>
+                <p class="mt-3 leading-7 text-gray-600">Isi data akun klien jika ingin menentukan sendiri. Kolom username, password, nomor HP, dan PIN boleh dikosongkan; sistem akan membuat nilai acak untuk kolom yang kosong. QR tetap dapat digunakan tanpa paket aktif.</p>
                 <form id="activation-form" method="POST" action="{{ $activationUrl ?? route('qr.public.activate', $unit->token) }}" class="mt-6 space-y-4">@csrf
                     <input type="hidden" name="place_id" id="place_id" value="{{ old('place_id') }}">
                     <input type="hidden" name="session_token" id="session_token" value="{{ (string) \Illuminate\Support\Str::uuid() }}">
+                    <div>
+                        <label for="username" class="mb-1 block text-sm font-semibold">Username (opsional)</label>
+                        <input id="username" name="username" value="{{ old('username') }}" maxlength="50" pattern="[a-z0-9_-]+" autocomplete="username" class="w-full rounded-lg border-gray-300 focus:border-green-500 focus:ring-green-500" placeholder="Kosongkan untuk dibuat acak">
+                        @error('username')<p class="mt-1 text-sm text-red-600">{{ $message }}</p>@enderror
+                    </div>
+                    <div>
+                        <label for="phone" class="mb-1 block text-sm font-semibold">Nomor WhatsApp (opsional)</label>
+                        <input id="phone" name="phone" type="tel" value="{{ old('phone') }}" maxlength="30" autocomplete="tel" class="w-full rounded-lg border-gray-300 focus:border-green-500 focus:ring-green-500" placeholder="Kosongkan untuk dibuat acak">
+                        @error('phone')<p class="mt-1 text-sm text-red-600">{{ $message }}</p>@enderror
+                    </div>
+                    <div>
+                        <label for="password" class="mb-1 block text-sm font-semibold">Password (opsional)</label>
+                        <input id="password" name="password" type="password" minlength="8" autocomplete="new-password" class="w-full rounded-lg border-gray-300 focus:border-green-500 focus:ring-green-500" placeholder="Kosongkan untuk dibuat acak">
+                        @error('password')<p class="mt-1 text-sm text-red-600">{{ $message }}</p>@enderror
+                    </div>
+                    <div>
+                        <label for="password_confirmation" class="mb-1 block text-sm font-semibold">Ulangi password jika diisi</label>
+                        <input id="password_confirmation" name="password_confirmation" type="password" minlength="8" autocomplete="new-password" class="w-full rounded-lg border-gray-300 focus:border-green-500 focus:ring-green-500">
+                    </div>
+                    <div>
+                        <label for="pin" class="mb-1 block text-sm font-semibold">PIN opsional (4–8 angka)</label>
+                        <input id="pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]{4,8}" maxlength="8" autocomplete="off" class="w-full rounded-lg border-gray-300 focus:border-green-500 focus:ring-green-500">
+                        @error('pin')<p class="mt-1 text-sm text-red-600">{{ $message }}</p>@enderror
+                        <p class="mt-1 text-xs text-gray-500">Kosongkan untuk membuat PIN acak. Password dan PIN tidak dikirim lewat WhatsApp.</p>
+                    </div>
                     <div class="relative">
                         <label for="place_name" class="mb-1 block text-sm font-semibold">Nama tempat</label>
                         <input id="place_name" name="place_name" value="{{ old('place_name') }}" required maxlength="255" autocomplete="off" class="w-full rounded-lg border-gray-300 focus:border-green-500 focus:ring-green-500" placeholder="Ketik nama tempat" aria-autocomplete="list" aria-controls="place-results">
@@ -55,9 +80,27 @@
             const csrf = document.querySelector('input[name="_token"]').value;
             let timer;
             let request;
+            let locationPromise;
+            let userLocation = null;
 
             // A failed form round-trip starts a fresh autocomplete session; the place must be selected again.
             placeIdInput.value = '';
+
+            function getUserLocation() {
+                if (userLocation) return Promise.resolve(userLocation);
+                if (!navigator.geolocation) return Promise.resolve(null);
+                if (!locationPromise) {
+                    locationPromise = new Promise(resolve => navigator.geolocation.getCurrentPosition(
+                        position => {
+                            userLocation = {latitude: position.coords.latitude, longitude: position.coords.longitude};
+                            resolve(userLocation);
+                        },
+                        () => resolve(null),
+                        {enableHighAccuracy: false, timeout: 5000, maximumAge: 300000}
+                    ));
+                }
+                return locationPromise;
+            }
 
             function closeResults() { results.replaceChildren(); results.classList.add('hidden'); }
             nameInput.addEventListener('input', () => {
@@ -70,10 +113,11 @@
                 timer = setTimeout(async () => {
                     request = new AbortController();
                     try {
+                        const location = await getUserLocation();
                         const response = await fetch(@json(route('qr.places.autocomplete')), {
                             method: 'POST', signal: request.signal,
                             headers: {'Content-Type':'application/json','Accept':'application/json','X-CSRF-TOKEN':csrf},
-                            body: JSON.stringify({query, session_token:sessionInput.value})
+                            body: JSON.stringify({query, session_token:sessionInput.value, ...(location || {})})
                         });
                         const data = await response.json();
                         closeResults();

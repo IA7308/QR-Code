@@ -46,6 +46,9 @@ class NewPasswordController extends Controller
                     'password' => Hash::make($request->password),
                     'remember_token' => Str::random(60),
                 ])->save();
+                if ($user->role === 'qr_client') {
+                    $user->qrClient?->update(['password_encrypted' => $request->password]);
+                }
 
                 event(new PasswordReset($user));
             }

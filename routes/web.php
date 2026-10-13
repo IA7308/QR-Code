@@ -20,6 +20,8 @@ use App\Http\Controllers\QrAdminPageController;
 use App\Http\Controllers\QrClientRegistrationController;
 use App\Http\Controllers\QrClientPortalController;
 use App\Http\Controllers\QrBillingAdminController;
+use App\Http\Controllers\AdminActivityLogController;
+use App\Http\Controllers\ClientActivityLogController;
 use App\Http\Controllers\UniversalQrController;
 use App\Http\Controllers\QrNfcController;
 
@@ -32,6 +34,9 @@ Route::get('/p/{place}', [PlaceController::class, 'publicShow'])->name('places.p
 Route::post('/p/{place}/review', [PlaceController::class, 'guestReview'])
     ->middleware('throttle:10,1')
     ->name('places.public.review');
+Route::post('/p/{place}/feedback', [PlaceController::class, 'storeGuestFeedback'])
+    ->middleware('throttle:120,1')
+    ->name('places.public.feedback');
 
 Route::get('/q/{token}', [QrUnitController::class, 'publicShow'])
     ->where('token', '[a-f0-9]{48}')
@@ -43,12 +48,16 @@ Route::post('/q/{token}', [QrUnitController::class, 'activatePublic'])
 Route::post('/q/{token}/select-location', [QrUnitController::class, 'selectSharedDestination'])
     ->where('token', '[a-f0-9]{48}')
     ->middleware('throttle:20,1')->name('qr.shared.select');
+Route::get('/q/{token}/review/{qrDestination}', [QrUnitController::class, 'reviewForm'])->where('token', '[a-f0-9]{48}')->name('qr.review.form');
+Route::post('/q/{token}/feedback/{qrDestination}', [QrUnitController::class, 'storeGuestFeedback'])->where('token', '[a-f0-9]{48}')->middleware('throttle:120,1')->name('qr.feedback.store');
 Route::post('/q-place-autocomplete', [QrUnitController::class, 'autocomplete'])
     ->middleware('throttle:60,1')->name('qr.places.autocomplete');
 Route::get('/n/{token}', [QrUnitController::class, 'publicShow'])
     ->where('token', '[a-f0-9]{48}')->name('qr.nfc.show');
 Route::post('/n/{token}', [QrUnitController::class, 'activatePublic'])
     ->where('token', '[a-f0-9]{48}')->middleware('throttle:10,1')->name('qr.nfc.activate');
+Route::get('/n/{token}/review/{qrDestination}', [QrUnitController::class, 'reviewForm'])->where('token', '[a-f0-9]{48}')->name('qr.nfc.review.form');
+Route::post('/n/{token}/feedback/{qrDestination}', [QrUnitController::class, 'storeGuestFeedback'])->where('token', '[a-f0-9]{48}')->middleware('throttle:120,1')->name('qr.nfc.feedback.store');
 Route::get('/qr-nfc', [UniversalQrController::class, 'nfcReader'])->name('qr.nfc-reader.show');
 
 Route::get('/review-nearby', [UniversalQrController::class, 'show'])->name('qr.universal.show');
@@ -64,8 +73,13 @@ Route::middleware('guest')->group(function () {
     Route::get('/client/register', [QrClientRegistrationController::class, 'create'])->name('client.register');
     Route::post('/client/register', [QrClientRegistrationController::class, 'store'])->middleware('throttle:5,1')->name('client.register.store');
 });
-Route::middleware(['auth', 'role:qr_client'])->prefix('client')->name('client.')->group(function () {
+Route::middleware(['auth', 'role:qr_client', 'portal.activity'])->prefix('client')->name('client.')->group(function () {
     Route::get('/', [QrClientPortalController::class, 'dashboard'])->name('dashboard');
+    Route::get('/activity-logs', [ClientActivityLogController::class, 'index'])->name('activity-logs.index');
+    Route::get('/activity-logs/{activityLog}', [ClientActivityLogController::class, 'show'])->name('activity-logs.show');
+    Route::get('/profile', [QrClientPortalController::class, 'editProfile'])->name('profile.edit');
+    Route::patch('/profile', [QrClientPortalController::class, 'updateProfile'])->name('profile.update');
+    Route::delete('/profile', [QrClientPortalController::class, 'destroyAccount'])->name('profile.destroy');
     Route::get('/plans', [QrClientPortalController::class, 'plans'])->name('plans');
     Route::post('/plans/{qrPlan}/subscribe', [QrClientPortalController::class, 'subscribe'])->name('subscribe');
     Route::post('/subscriptions/{qrSubscription}/cancel', [QrClientPortalController::class, 'cancelSubscription'])->name('subscriptions.cancel');
@@ -73,13 +87,21 @@ Route::middleware(['auth', 'role:qr_client'])->prefix('client')->name('client.')
     Route::post('/invoices/{qrInvoice}/proof', [QrClientPortalController::class, 'submitProof'])->name('invoices.proof');
     Route::get('/invoices/{qrInvoice}/proof-file', [QrClientPortalController::class, 'proofFile'])->name('invoices.proof-file');
     Route::get('/units', [QrClientPortalController::class, 'units'])->name('units');
+    Route::get('/units/{qrUnit}', [QrClientPortalController::class, 'unitDetail'])->name('units.show');
+    Route::get('/feedback', [App\Http\Controllers\GuestFeedbackController::class, 'clientIndex'])->name('feedback');
     Route::get('/units/{qrUnit}/print', [QrClientPortalController::class, 'printUnit'])->name('units.print');
 });
 
 // === GRUP RUTE ADMIN (Hanya untuk Aksi Delete dan Sensitif) ===
-Route::middleware(['auth', 'role:admin'])->group(function () {
+Route::middleware(['auth', 'role:admin', 'portal.activity'])->group(function () {
+
+    Route::get('admin/activity-logs', [AdminActivityLogController::class, 'index'])->name('admin.activity-logs.index');
+    Route::get('admin/activity-logs/{activityLog}', [AdminActivityLogController::class, 'show'])->name('admin.activity-logs.show');
 
     Route::get('admin/qr-clients', [QrBillingAdminController::class, 'clients'])->name('admin.qr-clients.index');
+    Route::get('admin/qr-clients/{qrClient}/edit', [QrBillingAdminController::class, 'editClient'])->name('admin.qr-clients.edit');
+    Route::patch('admin/qr-clients/{qrClient}', [QrBillingAdminController::class, 'updateClient'])->name('admin.qr-clients.update');
+    Route::delete('admin/qr-clients/{qrClient}', [QrBillingAdminController::class, 'destroyClient'])->name('admin.qr-clients.destroy');
     Route::patch('admin/qr-clients/{qrClient}/status', [QrBillingAdminController::class, 'updateClientStatus'])->name('admin.qr-clients.status');
     Route::get('admin/qr-plans', [QrBillingAdminController::class, 'plans'])->name('admin.qr-plans.index');
     Route::post('admin/qr-plans', [QrBillingAdminController::class, 'storePlan'])->name('admin.qr-plans.store');
@@ -138,17 +160,18 @@ Route::middleware(['auth', 'role:admin'])->group(function () {
 });
 
 // === GRUP RUTE UTAMA (CRUD Non-Delete - Semua Boleh Akses) ===
-Route::middleware('auth')->group(function () {
+Route::middleware(['auth', 'portal.activity'])->group(function () {
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
 });
 
-Route::middleware(['auth', 'legacy-user'])->group(function () {
+Route::middleware(['auth', 'legacy-user', 'portal.activity'])->group(function () {
 
     // Daftar tempat, tautan Google, dan QR ulasan
     Route::post('places/qr', [PlaceController::class, 'createQrDraft'])->name('places.drafts.store');
     Route::get('places/{place}/qr/download', [PlaceController::class, 'downloadQr'])->name('places.qr.download');
     Route::resource('places', PlaceController::class)->except(['destroy']);
+    Route::get('/feedback', [App\Http\Controllers\GuestFeedbackController::class, 'index'])->name('feedback.index');
 
     // 1. Domba
     Route::resource('sheep', SheepController::class)->except(['destroy']);

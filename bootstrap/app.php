@@ -15,6 +15,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'role' => \App\Http\Middleware\CheckRole::class,
             'legacy-user' => \App\Http\Middleware\EnsureLegacyUser::class,
+            'portal.activity' => \App\Http\Middleware\LogPortalActivity::class,
         ]);
 
         // Trust the local Cloudflare Tunnel proxy so HTTPS URLs and redirects use

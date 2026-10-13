@@ -17,9 +17,9 @@ class QrUnit extends Model
     public const STATUS_ACTIVE = 'ACTIVE';
     public const STATUS_DISABLED = 'DISABLED';
 
-    protected $fillable = ['qr_template_id', 'qr_client_id', 'unit_code', 'token', 'activation_code', 'status', 'production_batch'];
+    protected $fillable = ['qr_template_id', 'qr_client_id', 'public_activation_free', 'unit_code', 'token', 'activation_code', 'status', 'production_batch'];
 
-    protected $casts = ['activation_code' => 'encrypted'];
+    protected $casts = ['activation_code' => 'encrypted', 'public_activation_free' => 'boolean'];
 
     public function client(): BelongsTo
     {
@@ -39,6 +39,11 @@ class QrUnit extends Model
     public function scanEvents(): HasMany
     {
         return $this->hasMany(QrScanEvent::class, 'qr_unit_id');
+    }
+
+    public function guestFeedback(): HasMany
+    {
+        return $this->hasMany(GuestFeedback::class, 'qr_unit_id');
     }
 
     public function currentDestination(): HasOne

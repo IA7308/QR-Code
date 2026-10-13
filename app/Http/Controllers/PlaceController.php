@@ -76,11 +76,32 @@ class PlaceController extends Controller
             return view('places.public', compact('place'));
         }
 
-        if (filled($place->google_review_url)) {
-            return redirect()->away($place->google_review_url);
-        }
+        $feedbackSubmitted = session()->pull('guest_feedback_submitted', false);
+        $submissionToken = (string) Str::uuid();
 
-        return view('places.public', compact('place'));
+        return view('places.public', compact('place', 'submissionToken', 'feedbackSubmitted'));
+    }
+
+    public function storeGuestFeedback(Request $request, Place $place): RedirectResponse
+    {
+        abort_if($place->qr_sale_status === 'pending_payment', 403);
+
+        $data = $request->validate([
+            'submission_token' => ['required', 'uuid'],
+            'rating' => ['required', 'integer', 'between:1,5'],
+            'comment' => ['nullable', 'string', 'max:2000'],
+        ]);
+
+        $feedback = \App\Models\GuestFeedback::where('submission_token', $data['submission_token'])->first();
+        abort_if($feedback && (int) $feedback->place_id !== (int) $place->id, 404);
+        $place->guestFeedback()->updateOrCreate(
+            ['submission_token' => $data['submission_token']],
+            ['rating' => $data['rating'], 'comment' => $data['comment'] ?? null],
+        );
+
+        return filled($place->google_review_url)
+            ? redirect()->away($place->google_review_url)
+            : redirect()->route('places.public', $place)->with('guest_feedback_submitted', true);
     }
 
     public function guestReview(Request $request, Place $place): RedirectResponse
@@ -104,7 +125,7 @@ class PlaceController extends Controller
 
         $apiKey = config('services.google_maps.api_key');
         if (filled($place->google_review_url)) {
-            return redirect()->away($place->google_review_url);
+            return redirect()->route('places.public', $place);
         }
 
         if (filled($place->name) || filled($place->address)) {
@@ -182,14 +203,14 @@ class PlaceController extends Controller
             $place->refresh();
 
             if (filled($place->google_review_url)) {
-                return redirect()->away($place->google_review_url);
+                return redirect()->route('places.public', $place);
             }
 
             return redirect()->route('places.public', $place)
                 ->withErrors(['place_address' => 'QR ini baru saja diperbarui. Pindai ulang untuk melanjutkan.']);
         }
 
-        return redirect()->away($reviewUrl);
+        return redirect()->route('places.public', $place);
     }
 
     public function edit(Place $place): View

@@ -6,11 +6,14 @@ use App\Models\QrDestination;
 use App\Models\QrScanEvent;
 use App\Models\QrTemplate;
 use App\Models\QrUnit;
+use App\Models\QrClient;
+use App\Models\User;
 use App\Services\GooglePlaceLookup;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -22,10 +25,17 @@ class QrUnitController extends Controller
         $data = $request->validate([
             'query' => ['required', 'string', 'min:3', 'max:200'],
             'session_token' => ['required', 'string', 'max:36'],
+            'latitude' => ['nullable', 'numeric', 'between:-90,90'],
+            'longitude' => ['nullable', 'numeric', 'between:-180,180'],
         ]);
 
         try {
-            return response()->json(['suggestions' => $places->autocomplete($data['query'], $data['session_token'])]);
+            return response()->json(['suggestions' => $places->autocomplete(
+                $data['query'],
+                $data['session_token'],
+                isset($data['latitude']) ? (float) $data['latitude'] : null,
+                isset($data['longitude']) ? (float) $data['longitude'] : null,
+            )]);
         } catch (\RuntimeException $exception) {
             return response()->json(['message' => $exception->getMessage()], 422);
         }
@@ -40,8 +50,16 @@ class QrUnitController extends Controller
 
         QrScanEvent::create(['qr_unit_id' => $unit->id, 'event_type' => QrScanEvent::TYPE_SCAN]);
 
-        if ($unit->qr_client_id && !$unit->client()->where('status', 'ACTIVE')->whereHas('subscriptions', fn ($query) => $query->where('status', 'ACTIVE')->where('ends_at', '>', now()))->exists()) {
-            return response()->view('qr.expired', compact('unit'), 403);
+        if ($unit->qr_client_id) {
+            $clientActive = $unit->client()->where('status', 'ACTIVE')->exists();
+            $hasActiveSubscription = $unit->client()
+                ->where('status', 'ACTIVE')
+                ->whereHas('subscriptions', fn ($query) => $query->where('status', 'ACTIVE')->where('ends_at', '>', now()))
+                ->exists();
+
+            if (!$clientActive || (!$unit->public_activation_free && !$hasActiveSubscription)) {
+                return response()->view('qr.expired', compact('unit'), 403);
+            }
         }
 
         if ($unit->template->shared_mode) {
@@ -53,8 +71,7 @@ class QrUnitController extends Controller
         }
 
         if ($unit->status === QrUnit::STATUS_ACTIVE && $unit->currentDestination) {
-            QrScanEvent::create(['qr_unit_id' => $unit->id, 'event_type' => QrScanEvent::TYPE_REVIEW_CLICK]);
-            return redirect()->away($unit->currentDestination->review_url);
+            return $this->reviewFormView($unit, $unit->currentDestination);
         }
 
         $activationUrl = request()->routeIs('qr.nfc.show')
@@ -64,13 +81,64 @@ class QrUnitController extends Controller
         return view('qr.public', compact('unit', 'activationUrl'));
     }
 
-    public function activatePublic(Request $request, string $token, GooglePlaceLookup $places): RedirectResponse
+    public function reviewForm(string $token, QrDestination $qrDestination): View
+    {
+        $unit = QrUnit::query()->with('template')->where('token', $token)->firstOrFail();
+        abort_unless($unit->status === QrUnit::STATUS_ACTIVE, 404);
+        abort_unless($qrDestination->qr_unit_id === $unit->id && $qrDestination->deactivated_at === null, 404);
+
+        return $this->reviewFormView($unit, $qrDestination);
+    }
+
+    private function reviewFormView(QrUnit $unit, QrDestination $destination): View
+    {
+        $isNfc = request()->routeIs('qr.nfc.*');
+        $feedbackSubmitted = session()->pull('qr_feedback_submitted', false);
+        $feedbackUrl = route($isNfc ? 'qr.nfc.feedback.store' : 'qr.feedback.store', [$unit->token, $destination->id]);
+        $submissionToken = (string) Str::uuid();
+
+        return view('qr.feedback', compact('unit', 'destination', 'feedbackUrl', 'submissionToken', 'feedbackSubmitted'));
+    }
+
+    public function storeGuestFeedback(Request $request, string $token, QrDestination $qrDestination): RedirectResponse
+    {
+        $unit = QrUnit::query()->where('token', $token)->firstOrFail();
+        abort_unless($unit->status === QrUnit::STATUS_ACTIVE, 404);
+        abort_unless($qrDestination->qr_unit_id === $unit->id && $qrDestination->deactivated_at === null, 404);
+        $data = $request->validate([
+            'submission_token' => ['required', 'uuid'],
+            'rating' => ['required', 'integer', 'between:1,5'],
+            'comment' => ['nullable', 'string', 'max:2000'],
+        ]);
+
+        $feedback = \App\Models\GuestFeedback::where('submission_token', $data['submission_token'])->first();
+        abort_if($feedback && ((int) $feedback->qr_unit_id !== (int) $unit->id || (int) $feedback->qr_destination_id !== (int) $qrDestination->id), 404);
+        \App\Models\GuestFeedback::updateOrCreate(
+            ['submission_token' => $data['submission_token']],
+            [
+                'qr_unit_id' => $unit->id,
+                'qr_destination_id' => $qrDestination->id,
+                'rating' => $data['rating'],
+                'comment' => $data['comment'] ?? null,
+            ],
+        );
+
+        QrScanEvent::create(['qr_unit_id' => $unit->id, 'event_type' => QrScanEvent::TYPE_REVIEW_CLICK]);
+
+        return redirect()->away($qrDestination->review_url);
+    }
+
+    public function activatePublic(Request $request, string $token, GooglePlaceLookup $places): RedirectResponse|View
     {
         $unit = QrUnit::query()->where('token', $token)->firstOrFail();
         if ($unit->template->shared_mode) {
             return $this->activateSharedLocation($request, $unit, $places);
         }
         $data = $request->validate([
+            'username' => ['nullable', 'string', 'lowercase', 'alpha_dash', 'max:50', 'unique:users,username'],
+            'password' => ['nullable', 'string', 'min:8', 'confirmed'],
+            'phone' => ['nullable', 'string', 'max:30', 'regex:/^\\+?[0-9\\s().-]{8,30}$/'],
+            'pin' => ['nullable', 'string', 'digits_between:4,8'],
             'place_name' => ['required', 'string', 'max:255'],
             'place_address' => ['required', 'string', 'max:2048'],
             'place_id' => ['required', 'string', 'max:255'],
@@ -91,8 +159,7 @@ class QrUnitController extends Controller
         if (!$attempt['acquired']) {
             $unit->refresh()->load('currentDestination');
             if ($unit->status === QrUnit::STATUS_ACTIVE && $unit->currentDestination) {
-                QrScanEvent::create(['qr_unit_id' => $unit->id, 'event_type' => QrScanEvent::TYPE_REVIEW_CLICK]);
-                return redirect()->away($unit->currentDestination->review_url);
+                return redirect()->route(request()->routeIs('qr.nfc.activate') ? 'qr.nfc.show' : 'qr.public.show', $token);
             }
 
             return redirect()->route('qr.public.show', $token)
@@ -117,33 +184,113 @@ class QrUnitController extends Controller
                 ->withErrors(['place_address' => $exception->getMessage()]);
         }
 
-        $activation = DB::transaction(function () use ($unit, $data, $destination): array {
-            $lockedUnit = QrUnit::query()->lockForUpdate()->findOrFail($unit->id);
-            if ($lockedUnit->status !== QrUnit::STATUS_PENDING) {
-                return ['status' => $lockedUnit->status, 'review_url' => null];
-            }
+        try {
+            $activation = DB::transaction(function () use ($unit, $data, $destination): array {
+                $lockedUnit = QrUnit::query()->lockForUpdate()->findOrFail($unit->id);
+                if ($lockedUnit->status !== QrUnit::STATUS_PENDING) {
+                    return ['status' => $lockedUnit->status, 'review_url' => null, 'whatsapp_url' => null, 'credentials' => null];
+                }
 
-            $lockedUnit->destinations()
-                ->whereNull('deactivated_at')
-                ->update(['deactivated_at' => now(), 'updated_at' => now()]);
+                $username = $data['username'] ?? null;
+                if (!$username) {
+                    do {
+                        $username = 'klien' . Str::lower(Str::random(8));
+                    } while (User::where('username', $username)->exists());
+                }
+                $password = $data['password'] ?? Str::random(16);
+                $phoneWasProvided = filled($data['phone'] ?? null);
+                $phone = $phoneWasProvided ? $data['phone'] : '000000' . random_int(100000, 999999);
+                $pin = $data['pin'] ?? (string) random_int(100000, 999999);
 
-            $savedDestination = $lockedUnit->destinations()->create([
-                'place_name' => $data['place_name'],
-                'place_address' => mb_substr($destination['place_address'], 0, 255),
-                'place_id' => $destination['place_id'],
-                'maps_url' => $destination['maps_url'],
-                'review_url' => $destination['review_url'],
-                'activated_at' => now(),
-            ]);
-            $lockedUnit->update(['status' => QrUnit::STATUS_ACTIVE]);
-            $lockedUnit->update(['activation_code' => null]);
+                $user = User::create([
+                    'name' => $username,
+                    'username' => $username,
+                    'email' => $username . '@qr-client.invalid',
+                    'phone' => $phone,
+                    'address' => $destination['place_address'],
+                    'password' => $password,
+                    'role' => 'qr_client',
+                ]);
+                $client = QrClient::create([
+                    'user_id' => $user->id,
+                    'status' => 'ACTIVE',
+                    'pin_hash' => Hash::make($pin),
+                    'password_encrypted' => $password,
+                    'pin_encrypted' => $pin,
+                ]);
 
-            return ['status' => QrUnit::STATUS_ACTIVE, 'review_url' => $savedDestination->review_url];
-        });
+                $lockedUnit->destinations()
+                    ->whereNull('deactivated_at')
+                    ->update(['deactivated_at' => now(), 'updated_at' => now()]);
+
+                $savedDestination = $lockedUnit->destinations()->create([
+                    'place_name' => $data['place_name'],
+                    'place_address' => mb_substr($destination['place_address'], 0, 255),
+                    'place_id' => $destination['place_id'],
+                    'maps_url' => $destination['maps_url'],
+                    'review_url' => $destination['review_url'],
+                    'activated_at' => now(),
+                ]);
+                $lockedUnit->update([
+                    'qr_client_id' => $client->id,
+                    'public_activation_free' => true,
+                    'status' => QrUnit::STATUS_ACTIVE,
+                ]);
+                $lockedUnit->update(['activation_code' => null]);
+
+                $whatsappUrl = null;
+                if ($phoneWasProvided) {
+                    $whatsappPhone = preg_replace('/\\D+/', '', $phone);
+                    if (str_starts_with($whatsappPhone, '0')) {
+                        $whatsappPhone = '62' . substr($whatsappPhone, 1);
+                    } elseif (str_starts_with($whatsappPhone, '8')) {
+                        $whatsappPhone = '62' . $whatsappPhone;
+                    }
+                    $message = "Registrasi QR berhasil.\nUsername: {$username}\nNomor WhatsApp: {$phone}\nPassword: {$password}\nPIN: {$pin}\nLokasi: {$data['place_name']}\nAlamat: {$destination['place_address']}";
+                    $whatsappUrl = 'https://wa.me/' . $whatsappPhone . '?text=' . rawurlencode($message);
+                }
+
+                return [
+                    'status' => QrUnit::STATUS_ACTIVE,
+                    'review_url' => $savedDestination->review_url,
+                    'whatsapp_url' => $whatsappUrl,
+                    'credentials' => [
+                        'username' => $username,
+                        'password' => $password,
+                        'phone' => $phone,
+                        'pin' => $pin,
+                        'username_generated' => blank($data['username'] ?? null),
+                        'password_generated' => blank($data['password'] ?? null),
+                        'phone_generated' => !$phoneWasProvided,
+                        'pin_generated' => blank($data['pin'] ?? null),
+                    ],
+                ];
+            });
+        } catch (\Throwable $exception) {
+            report($exception);
+            DB::transaction(function () use ($unit): void {
+                $lockedUnit = QrUnit::query()->lockForUpdate()->find($unit->id);
+                if ($lockedUnit?->status === QrUnit::STATUS_PENDING) {
+                    $lockedUnit->update(['status' => QrUnit::STATUS_EMPTY]);
+                }
+            });
+
+            return redirect()->route(request()->routeIs('qr.nfc.activate') ? 'qr.nfc.show' : 'qr.public.show', $token)
+                ->withInput()
+                ->withErrors(['username' => 'Data registrasi tidak tersimpan. Periksa username dan coba lagi.']);
+        }
 
         if ($activation['status'] === QrUnit::STATUS_ACTIVE && $activation['review_url']) {
-            QrScanEvent::create(['qr_unit_id' => $unit->id, 'event_type' => QrScanEvent::TYPE_REVIEW_CLICK]);
-            return redirect()->away($activation['review_url']);
+            if ($activation['whatsapp_url']) {
+                return view('qr.activation-complete', [
+                    'unit' => $unit->load('template'),
+                    'whatsappUrl' => $activation['whatsapp_url'],
+                    'reviewUrl' => $activation['review_url'],
+                    'credentials' => $activation['credentials'],
+                ]);
+            }
+
+            return redirect()->route(request()->routeIs('qr.nfc.activate') ? 'qr.nfc.show' : 'qr.public.show', $token);
         }
 
         return redirect()->route('qr.public.show', $token)
@@ -210,9 +357,7 @@ class QrUnitController extends Controller
             return back()->withErrors(['location' => 'Lokasi yang dipilih sudah tidak tersedia.']);
         }
 
-        QrScanEvent::create(['qr_unit_id' => $unit->id, 'event_type' => QrScanEvent::TYPE_REVIEW_CLICK]);
-
-        return redirect()->away($destination->review_url);
+        return redirect()->route('qr.review.form', [$unit->token, $destination->id]);
     }
 
     public function index(Request $request): View

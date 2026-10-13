@@ -10,6 +10,9 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rule;
+use Illuminate\Validation\Rules\Password;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -17,9 +20,77 @@ class QrBillingAdminController extends Controller
 {
     public function clients(): View
     {
-        $clients = QrClient::with(['user', 'subscriptions.plan'])->withCount('units')->latest()->paginate(30);
+        $clients = QrClient::with([
+            'user',
+            'subscriptions.plan',
+            'units:id,qr_client_id,unit_code,status',
+            'units.currentDestination',
+        ])->withCount('units')->latest()->paginate(30);
 
         return view('qr.admin.clients', compact('clients'));
+    }
+
+    public function editClient(QrClient $qrClient): View
+    {
+        $qrClient->load('user');
+
+        return view('qr.admin.client-edit', compact('qrClient'));
+    }
+
+    public function updateClient(Request $request, QrClient $qrClient): RedirectResponse
+    {
+        $user = $qrClient->user;
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'username' => ['required', 'string', 'lowercase', 'alpha_dash', 'max:50', Rule::unique('users', 'username')->ignore($user->id)],
+            'email' => ['required', 'string', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user->id)],
+            'phone' => ['nullable', 'string', 'max:30'],
+            'company_name' => ['nullable', 'string', 'max:255'],
+            'password' => ['nullable', 'string', Password::defaults(), 'confirmed'],
+            'pin' => ['nullable', 'string', 'digits_between:4,8'],
+            'clear_pin' => ['nullable', 'boolean'],
+        ]);
+
+        DB::transaction(function () use ($data, $qrClient, $user): void {
+            $user->name = $data['name'];
+            $user->username = $data['username'];
+            $user->email = $data['email'];
+            $user->phone = $data['phone'] ?? null;
+            if ($user->isDirty('email')) {
+                $user->email_verified_at = null;
+            }
+            if (filled($data['password'] ?? null)) {
+                $user->password = Hash::make($data['password']);
+                $qrClient->password_encrypted = $data['password'];
+            }
+            $user->save();
+
+            $qrClient->company_name = $data['company_name'] ?? null;
+            if (filled($data['pin'] ?? null)) {
+                $qrClient->pin_hash = Hash::make($data['pin']);
+                $qrClient->pin_encrypted = $data['pin'];
+            } elseif (!empty($data['clear_pin'])) {
+                $qrClient->pin_hash = null;
+                $qrClient->pin_encrypted = null;
+            }
+            $qrClient->save();
+        });
+
+        return redirect()->route('admin.qr-clients.index')->with('success', 'Data klien berhasil diperbarui.');
+    }
+
+    public function destroyClient(QrClient $qrClient): RedirectResponse
+    {
+        $proofPaths = QrInvoice::query()
+            ->whereHas('subscription', fn ($query) => $query->where('qr_client_id', $qrClient->id))
+            ->whereNotNull('proof_path')
+            ->pluck('proof_path');
+        DB::transaction(fn () => $qrClient->user()->firstOrFail()->delete());
+        foreach ($proofPaths as $proofPath) {
+            Storage::disk('local')->delete($proofPath);
+        }
+
+        return redirect()->route('admin.qr-clients.index')->with('success', 'Akun klien dihapus. Unit QR dilepas dari akun; subscription dan invoice ikut dihapus.');
     }
 
     public function updateClientStatus(Request $request, QrClient $qrClient): RedirectResponse

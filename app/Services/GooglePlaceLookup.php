@@ -7,7 +7,7 @@ use RuntimeException;
 
 class GooglePlaceLookup
 {
-    public function autocomplete(string $input, string $sessionToken): array
+    public function autocomplete(string $input, string $sessionToken, ?float $latitude = null, ?float $longitude = null): array
     {
         $apiKey = config('services.google_maps.api_key');
         if (!filled($apiKey)) {
@@ -17,13 +17,24 @@ class GooglePlaceLookup
         try {
             $response = Http::timeout(10)
                 ->withHeaders(['X-Goog-Api-Key' => $apiKey])
-                ->post('https://places.googleapis.com/v1/places:autocomplete', [
+                ->post('https://places.googleapis.com/v1/places:autocomplete', array_filter([
                     'input' => $input,
                     'languageCode' => 'id',
                     'regionCode' => 'ID',
                     'includeQueryPredictions' => false,
                     'sessionToken' => $sessionToken,
-                ]);
+                    'origin' => $latitude !== null && $longitude !== null
+                        ? ['latitude' => $latitude, 'longitude' => $longitude]
+                        : null,
+                    'locationBias' => $latitude !== null && $longitude !== null
+                        ? [
+                            'circle' => [
+                                'center' => ['latitude' => $latitude, 'longitude' => $longitude],
+                                'radius' => 50000,
+                            ],
+                        ]
+                        : null,
+                ], fn ($value) => $value !== null));
         } catch (\Throwable $exception) {
             report($exception);
             throw new RuntimeException('Saran tempat tidak dapat dimuat. Periksa koneksi lalu coba lagi.', previous: $exception);
@@ -45,9 +56,11 @@ class GooglePlaceLookup
                     'place_id' => $prediction['placeId'],
                     'name' => $prediction['structuredFormat']['mainText']['text'] ?? $prediction['text']['text'] ?? '',
                     'address' => $prediction['structuredFormat']['secondaryText']['text'] ?? $prediction['text']['text'] ?? '',
+                    'distance_meters' => isset($prediction['distanceMeters']) ? (int) $prediction['distanceMeters'] : null,
                 ];
             })
             ->filter(fn (?array $place): bool => $place !== null && filled($place['name']))
+            ->sortBy(fn (array $place): int => $place['distance_meters'] ?? PHP_INT_MAX)
             ->values()
             ->all();
     }

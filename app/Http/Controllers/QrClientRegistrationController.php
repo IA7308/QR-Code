@@ -24,6 +24,7 @@ class QrClientRegistrationController extends Controller
     {
         $data = $request->validate([
             'name' => ['required', 'string', 'max:255'],
+            'username' => ['required', 'string', 'lowercase', 'alpha_dash', 'max:50', 'unique:users,username'],
             'company_name' => ['nullable', 'string', 'max:255'],
             'email' => ['required', 'string', 'lowercase', 'email', 'max:255', 'unique:users,email'],
             'phone' => ['nullable', 'string', 'max:30'],
@@ -33,6 +34,7 @@ class QrClientRegistrationController extends Controller
         $user = DB::transaction(function () use ($data): User {
             $user = User::create([
                 'name' => $data['name'],
+                'username' => $data['username'],
                 'email' => $data['email'],
                 'phone' => $data['phone'] ?? null,
                 'password' => Hash::make($data['password']),
@@ -42,6 +44,7 @@ class QrClientRegistrationController extends Controller
                 'user_id' => $user->id,
                 'company_name' => $data['company_name'] ?? null,
                 'status' => 'ACTIVE',
+                'password_encrypted' => $data['password'],
             ]);
 
             return $user;

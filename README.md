@@ -7,6 +7,17 @@
 <a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
 </p>
 
+## Update Log
+
+### V1.1 — 13 Oktober 2026
+
+- Menambahkan portal klien QR dengan pengelolaan profil, subscription, invoice, unit QR, dan kredensial.
+- Menambahkan dashboard analytics klien serta penguncian analytics sampai paket Starter diverifikasi admin.
+- Menambahkan halaman detail QR klien dengan statistik scan, riwayat tempat, feedback, dan opsi cetak.
+- Menambahkan Activity Log untuk aksi admin dan klien, termasuk halaman detail dengan penyaringan data sensitif.
+- Menambahkan alur feedback tamu, perbaikan pengelolaan klien, dan penyempurnaan halaman QR publik.
+- Memperbaiki pemuatan halaman klien dan beberapa alur autentikasi serta pencarian tempat.
+
 ## About Laravel
 
 Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:

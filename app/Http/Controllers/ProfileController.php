@@ -16,6 +16,8 @@ class ProfileController extends Controller
      */
     public function edit(Request $request): View
     {
+        abort_unless($request->user()->role !== 'qr_client', 404);
+
         return view('profile.edit', [
             'user' => $request->user(),
         ]);
@@ -26,6 +28,8 @@ class ProfileController extends Controller
      */
     public function update(ProfileUpdateRequest $request): RedirectResponse
     {
+        abort_unless($request->user()->role !== 'qr_client', 404);
+
         $request->user()->fill($request->validated());
 
         if ($request->user()->isDirty('email')) {
